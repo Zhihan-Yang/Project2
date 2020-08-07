@@ -77,7 +77,7 @@ hr <- hclust(as.dist(1-cor(t(y), method="pearson")), method="complete")
 hc <- hclust(as.dist(1-cor(y, method="spearman")), method="complete") 
 ## Tree cutting
 mycl1 <- cutree(hr, h=max(hr$height)/1.05)
-#1.12分成为五类 1.1分成三类
+
 #mycolhc <- c("#C1CDCD","#458B00","#8B3E2F","#1C86EE","#FF4500")
 mycolhc <- c("#FF4500","#8B3E2F","#1C86EE")
 mycolhc <- mycolhc[as.vector(mycl1)] 
@@ -90,12 +90,6 @@ dev.off()
 as.data.frame(table(mycl1)) 
 as.data.frame(mycl1) 
 write.csv(as.data.frame(mycl1),file="~/project2/mycl1.csv",quote=F,row.names=T)
-
-#1	1167			
-#2	2783			
-#3	962	
-#link:http://girke.bioinformatics.ucr.edu/GEN242/pages/mydoc/Rclustering.html
-#link:https://uc-r.github.io/hc_clustering optimal k of hc
 ```
 
 ```{Detail}
@@ -349,10 +343,6 @@ prob3<-predict(object =model3,newdata=Data_Q3_class3_0[,-ncol(Data_Q3_class3_0)]
 pred3<-ifelse(prob3>=0.5,"yes","no")
 pred3<-factor(pred3,levels = c("no","yes"),order=TRUE)
 f3<-table(Data_Q3_class3_0$Class,pred3)
-#模型对非流失客户(no)的预测还是非常准确的（1408/(1408+35)=97.6%）;
-#模型对流失客户(yes)的预测非常不理想（42/(182+42)=18.8%）
-#模型的整体预测准确率为87.0%((1408+42)/(1408+35+182+42))，还算说得过去。
-#link:https://zhuanlan.zhihu.com/p/28414024
 
 roc_curve1 <- roc(Data_Q3_class1_0$Class,prob1)
 roc_curve2 <- roc(Data_Q3_class2_0$Class,prob2)
@@ -377,11 +367,6 @@ p3=p + geom_line(colour = 'red') +geom_abline(intercept = 0, slope = 1)+ annotat
 png("Q3_logistic_ROC.png", width=900, height=300)
 p1+p2+p3
 dev.off()
-
-
-#predict(glmnet_multi,newx=gl_x,s=0.01215)
-
-
 ```
 
 ```{r lasso 6mers}
@@ -683,10 +668,6 @@ prob3<-predict(object =model3,newdata=Data_Q4_class3_4mers_0[,-ncol(Data_Q4_clas
 pred3<-ifelse(prob3>=0.5,"yes","no")
 pred3<-factor(pred3,levels = c("no","yes"),order=TRUE)
 f3<-table(Data_Q4_class3_4mers_0$Class,pred3)
-#模型对非流失客户(no)的预测还是非常准确的（1408/(1408+35)=97.6%）;
-#模型对流失客户(yes)的预测非常不理想（42/(182+42)=18.8%）
-#模型的整体预测准确率为87.0%((1408+42)/(1408+35+182+42))，还算说得过去。
-#link:https://zhuanlan.zhihu.com/p/28414024
 
 roc_curve1 <- roc(Data_Q4_class1_4mers_0$Class,prob1)
 roc_curve2 <- roc(Data_Q4_class2_4mers_0$Class,prob2)
@@ -711,9 +692,5 @@ p3=p + geom_line(colour = 'red') +geom_abline(intercept = 0, slope = 1)+ annotat
 png("Q4_logistic_ROC_4mers.png", width=900, height=300)
 p1+p2+p3
 dev.off()
-
-
-#predict(glmnet_multi,newx=gl_x,s=0.01215)
-
 
 ```
