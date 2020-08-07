@@ -1,0 +1,719 @@
+---
+title: "project2
+output: html_document
+---
+---
+title: "code"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = TRUE)
+#install.packages("cluster")
+#install.packages("ggfortify")
+#install.packages("psych")
+#install.packages("factoextra")
+#install.packages("gglasso")
+
+library(tidyverse)
+library(tidyr)
+library(cluster)    
+library(ggplot2)
+library(gplots) 
+library(ggfortify)
+library(patchwork)
+library(stats)
+library(psych)
+library(reshape2)
+library(factoextra)
+library(FactoMineR)
+library(corrplot)
+library(glmnet)
+library(pROC)
+#library(here)
+```
+
+```{r initial data}
+kallcounts <- readr::read_tsv("~/project2/CW-kallisto-abundance-foldchange-long-bygene.txt")
+kallcounts  <- kallcounts[-which(kallcounts$FoldChange=='NaN'|kallcounts$FoldChange=='Inf'|kallcounts$FoldChange=='-Inf'|kallcounts$FoldChange=='NA'), ]
+
+kallcounts$Log.FoldChange=log(kallcounts$FoldChange)
+
+p1=ggplot(kallcounts, aes(x = FoldChange)) + geom_line(colour = "black", stat = "density",size=1)+ theme_bw()+theme(panel.grid=element_blank(),panel.border=element_blank(),axis.line=element_line(size=1,colour="black"))+theme(axis.text.x = element_text(hjust=0.5, vjust=.5,size=12),axis.title.y=element_text(size=14),axis.title.x=element_text(size=14))
+
+p2=ggplot(kallcounts, aes(x = Log.FoldChange)) + geom_line(colour = "black", stat = "density",size=1)+theme_bw()+theme(panel.grid=element_blank(),panel.border=element_blank(),axis.line=element_line(size=1,colour="black"))+theme(axis.text.x = element_text(hjust=0.5, vjust=.5,size=12),axis.title.y=element_text(size=14),axis.title.x=element_text(size=14))
+
+png("Initialdata_log.png", width=600, height=300)
+p1+p2
+dev.off()
+
+kallcounts$FoldChange=log(kallcounts$FoldChange)
+kallcounts <- kallcounts[-which(kallcounts$FoldChange=='NaN'|kallcounts$FoldChange=='Inf'|kallcounts$FoldChange=='-Inf'|kallcounts$FoldChange=='NA'|is.na(kallcounts)), ]
+```
+
+Q1
+
+```{r Data}
+Data_Q1=kallcounts[,c(1,2,5)]
+Data_Q1=pivot_wider(Data_Q1,id_cols =Gene,names_from = Code,values_from = FoldChange)
+Data_Q1  <- Data_Q1[complete.cases(Data_Q1),]
+```
+
+```{r Hierarchical Method}
+
+Data_Q1_0 <- pivot_longer(Data_Q1,col=-Gene,names_to="Code",values_to="FoldChange")
+png("Q1_initial_heatmap.png", width=1000, height=3000)
+ggplot(Data_Q1_0, aes(x=Code,y=Gene))  + geom_tile(aes(fill=FoldChange)) + scale_fill_gradient(low ="darkgreen",high = "darkred")
+dev.off()
+
+
+Data_Q13 = Data_Q1
+gene_name=c(Data_Q13[,1])
+Data_Q13 = Data_Q1[,-1]
+condition=colnames(Data_Q13)
+Data_Q13 = as.matrix(Data_Q13)
+y <- matrix(Data_Q13, nrow(Data_Q13), ncol(Data_Q13), dimnames=list(gene_name$Gene, condition)) 
+hr <- hclust(as.dist(1-cor(t(y), method="pearson")), method="complete")
+hc <- hclust(as.dist(1-cor(y, method="spearman")), method="complete") 
+## Tree cutting
+mycl1 <- cutree(hr, h=max(hr$height)/1.05)
+#1.12分成为五类 1.1分成三类
+#mycolhc <- c("#C1CDCD","#458B00","#8B3E2F","#1C86EE","#FF4500")
+mycolhc <- c("#FF4500","#8B3E2F","#1C86EE")
+mycolhc <- mycolhc[as.vector(mycl1)] 
+mycol <- colorpanel(40, "darkgreen", "darkred") # or try redgreen(75)
+
+png("Q1_hcluster.png", width=1000, height=3000)
+heatmap.2(y,lhei = c(0.5,5),margins=c(4,10), Rowv=as.dendrogram(hr), Colv=as.dendrogram(hc), col=mycol, scale="row", density.info="none", trace="none", RowSideColors=mycolhc)
+dev.off()
+
+as.data.frame(table(mycl1)) 
+as.data.frame(mycl1) 
+write.csv(as.data.frame(mycl1),file="~/project2/mycl1.csv",quote=F,row.names=T)
+
+#1	1167			
+#2	2783			
+#3	962	
+#link:http://girke.bioinformatics.ucr.edu/GEN242/pages/mydoc/Rclustering.html
+#link:https://uc-r.github.io/hc_clustering optimal k of hc
+```
+
+```{Detail}
+Data_Q1$Class=mycl1
+Data_Q1_1 <- pivot_longer(Data_Q1,col=-c(Gene,Class),names_to="Code",values_to="FoldChange")
+Data_Q1_1 <- 
+        Data_Q1_1 %>%
+        mutate(Medium=str_sub(Code,1,1),Temp=str_sub(Code,2,2),Time=str_sub(Code,3,3),Rep=str_sub(Code,4,4))
+Code=unique(Data_Q1_1$Code)
+Class=unique(Data_Q1_1$Class)
+
+count <- matrix(rep(rep(0,times=length(Class)),times=length(Code)),ncol=36) 
+
+for (i in 1:length(Class)){
+        for (j in 1:length(Code)){
+                data=Data_Q1_1[which(Data_Q1_1$Class==i & Data_Q1_1$Code==Code[j]),]
+                count[i,j] <-  mean(data$FoldChange)
+        }
+}
+df <- data.frame(count)
+colnames(df) <- Code
+df$Class <- as.character(Class) 
+df <- pivot_longer(df,col=-Class,names_to="Code",values_to="FoldChange")
+
+png("Q1_hcluster_analysis1.png", width=700, height=300)
+p=ggplot(data = df, aes(x = Code, y = FoldChange, group= Class,colour=Class)) + geom_line(size=0.8)+ 
+        scale_color_manual(values=c("#FF4500","#8B3E2F","#1C86EE"))+
+        theme_bw()+
+        theme(axis.text.x = element_text(angle=45, hjust=0.5, vjust=.5,size=12),axis.text.y = element_text(hjust=0.5, vjust=.5,size=12),axis.title.y=element_text(size=14),legend.title=element_text(size=13),legend.text = element_text(size = 13),axis.title.x=element_text(size=14),panel.grid=element_blank(),panel.border=element_blank(),axis.line=element_line(size=1,colour="black"))
+dev.off()
+
+df <- df%>%mutate(Medium=str_sub(Code,1,1),Temp=str_sub(Code,2,2),Time=str_sub(Code,3,3),Rep=str_sub(Code,4,4))
+
+# Class detail
+p1=ggplot(data=df, aes(x=Class, y=FoldChange, fill=Medium)) + geom_boxplot()+ theme_bw()+theme(panel.grid=element_blank(),panel.border=element_blank(),axis.line=element_line(size=1,colour="black"))+ scale_fill_discrete(labels=c("RPMI+","YPD"))+
+        theme(axis.text.x = element_text(hjust=0.5, vjust=.5,size=14),axis.text.y = element_text(hjust=0.5, vjust=.5,size=14),axis.title.y=element_text(size=14),legend.title=element_text(size=13),legend.text = element_text(size = 12),axis.title.x=element_text(size=14))
+
+p2=ggplot(data=df, aes(x=Class, y=FoldChange, fill=Temp)) + geom_boxplot()+ theme_bw()+theme(panel.grid=element_blank(),panel.border=element_blank(),axis.line=element_line(size=1,colour="black"))+ scale_fill_discrete(name="Temperature",labels=c("25C", "37C","30C"))+
+        theme(axis.text.x = element_text(hjust=0.5, vjust=.5,size=14),axis.text.y = element_text(hjust=0.5, vjust=.5,size=14),axis.title.y=element_text(size=14),legend.title=element_text(size=13),legend.text = element_text(size = 12),axis.title.x=element_text(size=14))
+
+p3=ggplot(data=df, aes(x=Class, y=FoldChange, fill=Time)) + geom_boxplot()+ theme_bw()+theme(panel.grid=element_blank(),panel.border=element_blank(),axis.line=element_line(size=1,colour="black"))+ scale_fill_discrete(labels=c("0min", "10min","30min","60min","120min","180min"))+
+        theme(axis.text.x = element_text(hjust=0.5, vjust=.5,size=14),axis.text.y = element_text(hjust=0.5, vjust=.5,size=14),axis.title.y=element_text(size=14),legend.title=element_text(size=13),legend.text = element_text(size = 12),axis.title.x=element_text(size=14))
+
+
+png("Q1_hcluster_analysis_detail1.png", width=1200, height=300)
+p1+p2+p3
+dev.off()
+
+
+```
+
+Q2
+
+```{r}
+Data_Q2=kallcounts[,c(1,2,5)]
+Data_Q2=pivot_wider(Data_Q2,id_cols =Gene,names_from = Code,values_from = FoldChange)
+Data_Q2  <- Data_Q2[complete.cases(Data_Q2),]
+
+
+Data_Q2_1=Data_Q2[-1]
+gene_name=Data_Q2[1]
+rownames(Data_Q2_1)=gene_name$Gene
+
+pca = prcomp(t(Data_Q2_1), scale=TRUE)
+ss=summary(pca)
+
+p=pca$rotation
+Data_Q22 = data.frame(p[,c(1,2,3,4,5,6,7)])
+rownames(Data_Q22)<-gene_name$Gene
+condition=colnames(Data_Q22)
+Data_Q22 = as.matrix(Data_Q22)
+
+y <- matrix(Data_Q22, nrow(Data_Q22), ncol(Data_Q22), dimnames=list(gene_name$Gene, condition)) 
+hr <- hclust(as.dist(1-cor(t(y), method="pearson")), method="complete")
+hc <- hclust(as.dist(1-cor(y, method="spearman")), method="complete") 
+## Tree cutting
+mycl2 <- cutree(hr, h=max(hr$height)/1.0015)
+#mycolhc <- rainbow(length(unique(mycl2)), start=0.1, end=0.9)
+mycolhc <- c("#8B3E2F","#FF4500","#1C86EE")
+mycolhc <- mycolhc[as.vector(mycl2)] 
+mycol <- colorpanel(40, "darkgreen", "darkred") # or try redgreen(75)
+
+png("Q2_PCA3_2.png", width=1000, height=3000)
+heatmap.2(y,lhei = c(1,5),margins=c(1,10), Rowv=as.dendrogram(hr), Colv=as.dendrogram(hc), col=mycol, scale="row", density.info="none", trace="none", RowSideColors=mycolhc)
+dev.off()
+
+as.data.frame(table(mycl1)) 
+as.data.frame(table(mycl2)) 
+as.data.frame(mycl2)
+
+#link:https://www.bioinfo-scrounger.com/archives/608/
+```
+
+```{r Q1 Q2 对比}
+data1=data.frame(mycl1)
+data1$Gene=gene_name$Gene
+data1$mycl2=mycl2
+
+data2=data1
+for(i in 1:nrow(data1)){
+        if(data2[i,3]==1)
+                data1[i,3]=2
+        if(data2[i,3]==2)
+                data1[i,3]=1
+        if(data2[i,3]==3)
+                data1[i,3]=3
+
+}
+
+rate_right = nrow(data1[which(data1$mycl1==data1$mycl2),])/nrow(data1)
+rate_right 
+
+
+table(data1[which(data1$mycl1!=data1$mycl2),])
+out_data=data1[which(data1$mycl1!=data1$mycl2),c(1,3)]
+
+a=rep(0,times=3)
+b=matrix(rep(a,times=3),ncol=3)
+
+for(i in 1:nrow(data1)){
+        for(x in 1:3){
+                for (y in 1:3){
+                        if(data1[i,1]==x & data1[i,3]==y){
+                        b[x,y]=b[x,y]+1}
+                }
+        }
+}
+```
+
+Q3
+```{r lasso}
+allorfs <- read.csv("~/project2/H99_allorfs_promoter500nt_5mercounts1.csv")
+Data_Q3 <- allorfs[,-1] 
+rownames(Data_Q3) <- gene_name$Gene
+Data_Q3$Gene=gene_name$Gene
+Data_Q3$Class=mycl1 
+for (i in nrow(Data_Q3):1){
+  if(str_sub(Data_Q3[i,"Gene"],6,6)==1){
+    Data_Q3=Data_Q3[-i,]
+  }
+}
+
+Data_Q3_class1=Data_Q3
+Data_Q3_class1[which(Data_Q3_class1$Class!=1),"Class"] <- 0
+Data_Q3_class1  <- Data_Q3_class1[complete.cases(Data_Q3_class1),]
+Data_Q3_class1_matrix =as.matrix(Data_Q3_class1[,1:(ncol(allorfs)-1)])
+gl_x=matrix(Data_Q3_class1_matrix,ncol=ncol(allorfs)-1)
+gl_y=Data_Q3_class1$Class
+glmnet_Q3_class1 <- glmnet(x=gl_x,y=gl_y,family = "binomial")
+
+Data_Q3_class2=Data_Q3
+Data_Q3_class2[which(Data_Q3_class2$Class!=2),"Class"] <- 0
+Data_Q3_class2[which(Data_Q3_class2$Class==2),"Class"] <- 1
+Data_Q3_class2  <- Data_Q3_class2[complete.cases(Data_Q3_class2),]
+Data_Q3_class2_matrix =as.matrix(Data_Q3_class2[,1:(ncol(allorfs)-1)])
+gl_x=matrix(Data_Q3_class2_matrix,ncol=ncol(allorfs)-1)
+gl_y=Data_Q3_class2$Class
+glmnet_Q3_class2 <- glmnet(x=gl_x,y=gl_y,family = "binomial")
+
+Data_Q3_class3=Data_Q3
+Data_Q3_class3[which(Data_Q3_class3$Class!=3),"Class"] <- 0
+Data_Q3_class3[which(Data_Q3_class3$Class==3),"Class"] <- 1
+Data_Q3_class3  <- Data_Q3_class3[complete.cases(Data_Q3_class3),]
+Data_Q3_class3_matrix =as.matrix(Data_Q3_class3[,1:(ncol(allorfs)-1)])
+gl_x=matrix(Data_Q3_class3_matrix,ncol=ncol(allorfs)-1)
+gl_y=Data_Q3_class3$Class
+glmnet_Q3_class3 <- glmnet(x=gl_x,y=gl_y,family = "binomial")
+
+coef_glm_m1 <- coef(glmnet_Q3_class1,s=0.025)  #2.940e-04
+glm_m1_out <- coef_glm_m1[which(coef_glm_m1 != 0),]
+coef_glm_m2 <- coef(glmnet_Q3_class2,s=0.025)  #2.940e-04
+glm_m2_out <- coef_glm_m2[which(coef_glm_m2 != 0),]
+coef_glm_m3 <- coef(glmnet_Q3_class3,s=0.025)  #2.940e-04
+glm_m3_out <- coef_glm_m3[which(coef_glm_m3 != 0),]
+
+glm_m1_out1 =glm_m1_out[-1]
+glm_m1_out0 =glm_m1_out[-1]
+for(i in (length(glm_m1_out)-1):1){
+  if(glm_m1_out[i]>0)
+    glm_m1_out0=glm_m1_out0[-i]
+  if(glm_m1_out[i]<0)
+    glm_m1_out1=glm_m1_out1[-i]
+}
+
+glm_m2_out1 =glm_m2_out[-1]
+glm_m2_out0 =glm_m2_out[-1]
+for(i in (length(glm_m2_out)-1):1){
+  if(glm_m2_out[i]>0)
+    glm_m2_out0=glm_m2_out0[-i]
+  if(glm_m2_out[i]<0)
+    glm_m2_out1=glm_m2_out1[-i]
+}
+
+glm_m3_out1 =glm_m3_out[-1]
+glm_m3_out0 =glm_m3_out[-1]
+for(i in (length(glm_m3_out)-1):1){
+  if(glm_m3_out[i]>0)
+    glm_m3_out0=glm_m3_out0[-i]
+  if(glm_m3_out[i]<0)
+    glm_m3_out1=glm_m3_out1[-i]
+}
+
+variable11=as.numeric(str_remove(names(glm_m1_out1),"V"))
+variable10=as.numeric(str_remove(names(glm_m1_out0),"V"))
+variable21=as.numeric(str_remove(names(glm_m2_out1),"V"))
+variable20=as.numeric(str_remove(names(glm_m2_out0),"V"))
+variable31=as.numeric(str_remove(names(glm_m3_out1),"V"))
+variable30=as.numeric(str_remove(names(glm_m3_out0),"V"))
+colnames(Data_Q3[,c(variable31)])
+colnames(Data_Q3[,c(variable30)])
+
+variable2=as.numeric(str_remove(names(glm_m2_out[-1]),"V"))
+variable3=as.numeric(str_remove(names(glm_m3_out[-1]),"V"))
+
+plot(glmnet_Q3_class1,xvar = "lambda")
+plot(glmnet_Q3_class2,xvar = "lambda")
+plot(glmnet_Q3_class3,xvar = "lambda")
+```
+
+```{r logistic}
+colnames(Data_Q3[,c(variable1)])
+Data_Q3_class1_0=Data_Q3[,c(variable1,ncol(Data_Q3))]
+Data_Q3_class1_0[which(Data_Q3_class1_0$Class!=1),"Class"] <- 0
+model1=glm(Class ~ .-Class,data=Data_Q3_class1_0,family = "binomial")
+summary(model1)
+
+Data_Q3_class2_0=Data_Q3[,c(variable2,ncol(Data_Q3))]
+Data_Q3_class2_0[which(Data_Q3_class2_0$Class!=2),"Class"] <- 0
+Data_Q3_class2_0[which(Data_Q3_class2_0$Class==2),"Class"] <- 1
+model2=glm(Class ~ .-Class,data=Data_Q3_class2_0,family = "binomial")
+summary(model2)
+
+Data_Q3_class3_0=Data_Q3[,c(variable3,ncol(Data_Q3))]
+Data_Q3_class3_0[which(Data_Q3_class3_0$Class!=3),"Class"] <- 0
+Data_Q3_class3_0[which(Data_Q3_class3_0$Class==3),"Class"] <- 1
+model3=glm(Class ~ .-Class,data=Data_Q3_class3_0,family = "binomial")
+summary(model3)
+
+anova(model3)
+prob1<-predict(object =model1,newdata=Data_Q3_class1_0[,-ncol(Data_Q3_class1_0)],type = "response")
+pred1<-ifelse(prob1>=0.5,"yes","no")
+pred1<-factor(pred1,levels = c("no","yes"),order=TRUE)
+f1<-table(Data_Q3_class1_0$Class,pred1)
+
+prob2<-predict(object =model2,newdata=Data_Q3_class2_0[,-ncol(Data_Q3_class2_0)],type = "response")
+pred2<-ifelse(prob2>=0.5,"yes","no")
+pred2<-factor(pred2,levels = c("no","yes"),order=TRUE)
+f2<-table(Data_Q3_class2_0$Class,pred2)
+
+prob3<-predict(object =model3,newdata=Data_Q3_class3_0[,-ncol(Data_Q3_class3_0)],type = "response")
+pred3<-ifelse(prob3>=0.5,"yes","no")
+pred3<-factor(pred3,levels = c("no","yes"),order=TRUE)
+f3<-table(Data_Q3_class3_0$Class,pred3)
+#模型对非流失客户(no)的预测还是非常准确的（1408/(1408+35)=97.6%）;
+#模型对流失客户(yes)的预测非常不理想（42/(182+42)=18.8%）
+#模型的整体预测准确率为87.0%((1408+42)/(1408+35+182+42))，还算说得过去。
+#link:https://zhuanlan.zhihu.com/p/28414024
+
+roc_curve1 <- roc(Data_Q3_class1_0$Class,prob1)
+roc_curve2 <- roc(Data_Q3_class2_0$Class,prob2)
+roc_curve3 <- roc(Data_Q3_class2_0$Class,prob3)
+names(roc_curve1)
+
+x <- 1-roc_curve1$specificities
+y <- roc_curve1$sensitivities
+p <- ggplot(data = NULL, mapping = aes(x= x, y = y))
+p1=p + geom_line(colour = 'red') +geom_abline(intercept = 0, slope = 1)+ annotate('text', x = 0.4, y = 0.5, label=paste('AUC=',round(roc_curve1$auc,2)))+ labs(x = '1-specificities',y = 'sensitivities', title = 'ROC Curve')+theme_bw()+theme(panel.grid=element_blank(),panel.border=element_blank(),axis.line=element_line(size=1,colour="black"))
+
+x <- 1-roc_curve2$specificities
+y <- roc_curve2$sensitivities
+p <- ggplot(data = NULL, mapping = aes(x= x, y = y))
+p2=p + geom_line(colour = 'red') +geom_abline(intercept = 0, slope = 1)+ annotate('text', x = 0.4, y = 0.5, label=paste('AUC=',round(roc_curve2$auc,2)))+ labs(x = '1-specificities',y = 'sensitivities', title = 'ROC Curve')+theme_bw()+theme(panel.grid=element_blank(),panel.border=element_blank(),axis.line=element_line(size=1,colour="black"))
+
+x <- 1-roc_curve3$specificities
+y <- roc_curve3$sensitivities
+p <- ggplot(data = NULL, mapping = aes(x= x, y = y))
+p3=p + geom_line(colour = 'red') +geom_abline(intercept = 0, slope = 1)+ annotate('text', x = 0.4, y = 0.5, label=paste('AUC=',round(roc_curve3$auc,2)))+ labs(x = '1-specificities',y = 'sensitivities', title = 'ROC Curve')+theme_bw()+theme(panel.grid=element_blank(),panel.border=element_blank(),axis.line=element_line(size=1,colour="black"))
+
+png("Q3_logistic_ROC.png", width=900, height=300)
+p1+p2+p3
+dev.off()
+
+
+#predict(glmnet_multi,newx=gl_x,s=0.01215)
+
+
+```
+
+```{r lasso 6mers}
+part1 <- read.csv("~/project2/H99_allorfs_promoter250nt_6mercounts1.csv")
+part2_1 <- read.csv("~/project2/H99_allorfs_promoter250nt_6mercounts2_1.csv")
+part2_2 <- read.csv("~/project2/H99_allorfs_promoter250nt_6mercounts2_2.csv")
+part3 <- read.csv("~/project2/H99_allorfs_promoter250nt_6mercounts3.csv")
+
+part1 <- part1[,-1]
+part2 <- full_join(part2_1[,-1],part2_2[,-1],by="Gene")
+part3 <- part3[,-1]
+Data_Q4 <- rbind(part1,part2,part3)
+
+rownames(Data_Q4) <- gene_name$Gene
+names(Data_Q4)[names(Data_Q4)=="mycl1"]="Class"
+for (i in nrow(Data_Q4):1){
+  if(str_sub(Data_Q4[i,"Gene"],6,6)==1){
+    Data_Q4=Data_Q4[-i,]
+  }
+}
+
+
+Data_Q4_class1=Data_Q4
+Data_Q4_class1[which(Data_Q4_class1$Class!=1),"Class"] <- 0
+Data_Q4_class1  <- Data_Q4_class1[complete.cases(Data_Q4_class1),]
+Data_Q4_class1_matrix =as.matrix(Data_Q4_class1[,2:4097])
+gl_x=matrix(Data_Q4_class1_matrix,ncol=4096)
+gl_y=Data_Q4_class1$Class
+glmnet_Q4_class1 <- glmnet(x=gl_x,y=gl_y,family = "binomial")
+
+Data_Q4_class2=Data_Q4
+Data_Q4_class2[which(Data_Q4_class2$Class!=2),"Class"] <- 0
+Data_Q4_class2[which(Data_Q4_class2$Class==2),"Class"] <- 1
+Data_Q4_class2  <- Data_Q4_class2[complete.cases(Data_Q4_class2),]
+Data_Q4_class2_matrix =as.matrix(Data_Q4_class2[,2:4097])
+gl_x=matrix(Data_Q4_class2_matrix,ncol=4096)
+gl_y=Data_Q4_class2$Class
+glmnet_Q4_class2 <- glmnet(x=gl_x,y=gl_y,family = "binomial")
+
+Data_Q4_class3=Data_Q4
+Data_Q4_class3[which(Data_Q4_class3$Class!=3),"Class"] <- 0
+Data_Q4_class3[which(Data_Q4_class3$Class==3),"Class"] <- 1
+Data_Q4_class3  <- Data_Q4_class3[complete.cases(Data_Q4_class3),]
+Data_Q4_class3_matrix =as.matrix(Data_Q4_class3[,2:4097])
+gl_x=matrix(Data_Q4_class3_matrix,ncol=4096)
+gl_y=Data_Q4_class3$Class
+glmnet_Q4_class3 <- glmnet(x=gl_x,y=gl_y,family = "binomial")
+
+
+coef_glm_m1 <- coef(glmnet_Q4_class1,s=0.025)  #2.940e-04
+glm_m1_out <- coef_glm_m1[which(coef_glm_m1 != 0),]
+coef_glm_m2 <- coef(glmnet_Q4_class2,s=0.025)  #2.940e-04
+glm_m2_out <- coef_glm_m2[which(coef_glm_m2 != 0),]
+coef_glm_m3 <- coef(glmnet_Q4_class3,s=0.025)  #2.940e-04
+glm_m3_out <- coef_glm_m3[which(coef_glm_m3 != 0),]
+
+glm_m1_out1 =glm_m1_out[-1]
+glm_m1_out0 =glm_m1_out[-1]
+for(i in (length(glm_m1_out)-1):1){
+  if(glm_m1_out[i]>0)
+    glm_m1_out0=glm_m1_out0[-i]
+  if(glm_m1_out[i]<0)
+    glm_m1_out1=glm_m1_out1[-i]
+}
+
+glm_m2_out1 =glm_m2_out[-1]
+glm_m2_out0 =glm_m2_out[-1]
+for(i in (length(glm_m2_out)-1):1){
+  if(glm_m2_out[i]>0)
+    glm_m2_out0=glm_m2_out0[-i]
+  if(glm_m2_out[i]<0)
+    glm_m2_out1=glm_m2_out1[-i]
+}
+
+glm_m3_out1 =glm_m3_out[-1]
+glm_m3_out0 =glm_m3_out[-1]
+for(i in (length(glm_m3_out)-1):1){
+  if(glm_m3_out[i]>0)
+    glm_m3_out0=glm_m3_out0[-i]
+  if(glm_m3_out[i]<0)
+    glm_m3_out1=glm_m3_out1[-i]
+}
+
+variable11=as.numeric(str_remove(names(glm_m1_out1),"V"))
+variable10=as.numeric(str_remove(names(glm_m1_out0),"V"))
+variable21=as.numeric(str_remove(names(glm_m2_out1),"V"))
+variable20=as.numeric(str_remove(names(glm_m2_out0),"V"))
+variable31=as.numeric(str_remove(names(glm_m3_out1),"V"))
+variable30=as.numeric(str_remove(names(glm_m3_out0),"V"))
+colnames(Data_Q4[,c(variable31+1)])
+colnames(Data_Q4[,c(variable30+1)])
+
+
+variable1=as.numeric(str_remove(names(glm_m1_out[-1]),"V"))
+variable2=as.numeric(str_remove(names(glm_m2_out[-1]),"V"))
+variable3=as.numeric(str_remove(names(glm_m3_out[-1]),"V"))
+
+plot(glmnet_Q4_class1,xvar = "lambda")
+plot(glmnet_Q4_class2,xvar = "lambda")
+plot(glmnet_Q4_class3,xvar = "lambda")
+```
+
+```{r logistic 6mers}
+Data_Q4_class1_0=Data_Q4[,c(variable1+1,ncol(Data_Q4))]
+names(Data_Q4_class1_0)[names(Data_Q4_class1_0)=="mycl1"]="Class"
+Data_Q4_class1_0[which(Data_Q4_class1_0$Class!=1),"Class"] <- 0
+model1=glm(Class ~ .-Class,data=Data_Q4_class1_0,family = "binomial")
+summary(model1)
+#anova(model1)
+
+Data_Q4_class2_0=Data_Q4[,c(variable2+1,ncol(Data_Q4))]
+names(Data_Q4_class2_0)[names(Data_Q4_class2_0)=="mycl1"]="Class"
+Data_Q4_class2_0[which(Data_Q4_class2_0$Class!=2),"Class"] <- 0
+Data_Q4_class2_0[which(Data_Q4_class2_0$Class==2),"Class"] <- 1
+model2=glm(Class ~ .-Class,data=Data_Q4_class2_0,family = "binomial")
+summary(model2)
+
+Data_Q4_class3_0=Data_Q4[,c(variable3+1,ncol(Data_Q4))]
+names(Data_Q4_class3_0)[names(Data_Q4_class3_0)=="mycl1"]="Class"
+Data_Q4_class3_0[which(Data_Q4_class3_0$Class!=3),"Class"] <- 0
+Data_Q4_class3_0[which(Data_Q4_class3_0$Class==3),"Class"] <- 1
+model3=glm(Class ~ .-Class,data=Data_Q4_class3_0,family = "binomial")
+summary(model3)
+
+
+prob1<-predict(object =model1,newdata=Data_Q4_class1_0[,-ncol(Data_Q4_class1_0)],type = "response")
+pred1<-ifelse(prob1>=0.5,"yes","no")
+pred1<-factor(pred1,levels = c("no","yes"),order=TRUE)
+f1<-table(Data_Q4_class1_0$Class,pred1)
+
+prob2<-predict(object =model2,newdata=Data_Q4_class2_0[,-ncol(Data_Q4_class2_0)],type = "response")
+pred2<-ifelse(prob2>=0.5,"yes","no")
+pred2<-factor(pred2,levels = c("no","yes"),order=TRUE)
+f2<-table(Data_Q4_class2_0$Class,pred2)
+
+prob3<-predict(object =model3,newdata=Data_Q4_class3_0[,-ncol(Data_Q4_class3_0)],type = "response")
+pred3<-ifelse(prob3>=0.5,"yes","no")
+pred3<-factor(pred3,levels = c("no","yes"),order=TRUE)
+f3<-table(Data_Q4_class3_0$Class,pred3)
+
+roc_curve1 <- roc(Data_Q4_class1_0$Class,prob1)
+roc_curve2 <- roc(Data_Q4_class2_0$Class,prob2)
+roc_curve3 <- roc(Data_Q4_class2_0$Class,prob3)
+names(roc_curve1)
+
+x <- 1-roc_curve1$specificities
+y <- roc_curve1$sensitivities
+p <- ggplot(data = NULL, mapping = aes(x= x, y = y))
+p1=p + geom_line(colour = 'red') +geom_abline(intercept = 0, slope = 1)+ annotate('text', x = 0.4, y = 0.5, label=paste('AUC=',round(roc_curve1$auc,2)))+ labs(x = '1-specificities',y = 'sensitivities', title = 'ROC Curve')+theme_bw()+theme(panel.grid=element_blank(),panel.border=element_blank(),axis.line=element_line(size=1,colour="black"))
+
+x <- 1-roc_curve2$specificities
+y <- roc_curve2$sensitivities
+p <- ggplot(data = NULL, mapping = aes(x= x, y = y))
+p2=p + geom_line(colour = 'red') +geom_abline(intercept = 0, slope = 1)+ annotate('text', x = 0.4, y = 0.5, label=paste('AUC=',round(roc_curve2$auc,2)))+ labs(x = '1-specificities',y = 'sensitivities', title = 'ROC Curve')+theme_bw()+theme(panel.grid=element_blank(),panel.border=element_blank(),axis.line=element_line(size=1,colour="black"))
+
+x <- 1-roc_curve3$specificities
+y <- roc_curve3$sensitivities
+p <- ggplot(data = NULL, mapping = aes(x= x, y = y))
+p3=p + geom_line(colour = 'red') +geom_abline(intercept = 0, slope = 1)+ annotate('text', x = 0.4, y = 0.5, label=paste('AUC=',round(roc_curve3$auc,2)))+ labs(x = '1-specificities',y = 'sensitivities', title = 'ROC Curve')+theme_bw()+theme(panel.grid=element_blank(),panel.border=element_blank(),axis.line=element_line(size=1,colour="black"))
+
+png("Q4_logistic_ROC_6mers.png", width=900, height=300)
+p1+p2+p3
+dev.off()
+
+
+#predict(glmnet_multi,newx=gl_x,s=0.01215)
+```
+
+```{r lasso 4mers}
+mers_4 <- readr::read_tsv("~/project2/H99_allorfs_promoter500nt_4mercounts.txt")
+Data_Q4_4mers <- right_join(mers_4,Data_Q1[,1],by="Gene")
+Data_Q4_4mers$Class=mycl1 
+for (i in nrow(Data_Q4_4mers):1){
+  if(str_sub(Data_Q4_4mers[i,"Gene"],6,6)==1){
+    Data_Q4_4mers=Data_Q4_4mers[-i,]
+  }
+}
+Data_Q4_4mers <- Data_Q4_4mers[complete.cases(Data_Q4_4mers),]
+
+Data_Q4_4mers_class1=Data_Q4_4mers
+Data_Q4_4mers_class1[which(Data_Q4_4mers_class1$Class!=1),"Class"] <- 0
+Data_Q4_4mers_1=as.matrix(Data_Q4_4mers_class1[,2:257])
+gl_x=matrix(Data_Q4_4mers_1,ncol=256)
+gl_y=Data_Q4_4mers_class1$Class
+glmnet_Q4_4mers_class1 <- glmnet(x=gl_x,y=gl_y,family = "binomial")
+
+Data_Q4_4mers_class2=Data_Q4_4mers
+Data_Q4_4mers_class2[which(Data_Q4_4mers_class2$Class!=2),"Class"] <- 0
+Data_Q4_4mers_class2[which(Data_Q4_4mers_class2$Class==2),"Class"] <- 1
+Data_Q4_4mers_2=as.matrix(Data_Q4_4mers_class2[,2:257])
+gl_x=matrix(Data_Q4_4mers_2,ncol=256)
+gl_y=Data_Q4_4mers_class2$Class
+glmnet_Q4_4mers_class2 <- glmnet(x=gl_x,y=gl_y,family = "binomial")
+
+Data_Q4_4mers_class3=Data_Q4_4mers
+Data_Q4_4mers_class3[which(Data_Q4_4mers_class3$Class!=3),"Class"] <- 0
+Data_Q4_4mers_class3[which(Data_Q4_4mers_class3$Class==3),"Class"] <- 1
+Data_Q4_4mers_3=as.matrix(Data_Q4_4mers_class3[,2:257])
+gl_x=matrix(Data_Q4_4mers_3,ncol=256)
+gl_y=Data_Q4_4mers_class3$Class
+glmnet_Q4_4mers_class3 <- glmnet(x=gl_x,y=gl_y,family = "binomial")
+
+print(1)
+
+png("Q4_lasso_1_4mers.png", width=300, height=300)
+plot(x=glmnet_multi_4mers$df,y=glmnet_multi_4mers$dev.ratio)  #0.1215
+dev.off()
+
+png("Q4_lasso_2_4mer.png", width=900, height=300)
+par(mfcol=c(1,3))
+plot(glmnet_multi_4mers,xvar = "lambda")
+dev.off()
+
+
+coef_glm_m1 <- coef(glmnet_Q4_4mers_class1,s=0.025)  #2.940e-04
+glm_m1_out <- coef_glm_m1[which(coef_glm_m1 != 0),]
+coef_glm_m2 <- coef(glmnet_Q4_4mers_class2,s=0.025)  #2.940e-04
+glm_m2_out <- coef_glm_m2[which(coef_glm_m2 != 0),]
+coef_glm_m3 <- coef(glmnet_Q4_4mers_class3,s=0.025)  #2.940e-04
+glm_m3_out <- coef_glm_m3[which(coef_glm_m3 != 0),]
+
+glm_m1_out1 =glm_m1_out[-1]
+glm_m1_out0 =glm_m1_out[-1]
+for(i in (length(glm_m1_out)-1):1){
+  if(glm_m1_out[i]>0)
+    glm_m1_out0=glm_m1_out0[-i]
+  if(glm_m1_out[i]<0)
+    glm_m1_out1=glm_m1_out1[-i]
+}
+
+glm_m2_out1 =glm_m2_out[-1]
+glm_m2_out0 =glm_m2_out[-1]
+for(i in (length(glm_m2_out)-1):1){
+  if(glm_m2_out[i]>0)
+    glm_m2_out0=glm_m2_out0[-i]
+  if(glm_m2_out[i]<0)
+    glm_m2_out1=glm_m2_out1[-i]
+}
+
+glm_m3_out1 =glm_m3_out[-1]
+glm_m3_out0 =glm_m3_out[-1]
+for(i in (length(glm_m3_out)-1):1){
+  if(glm_m3_out[i]>0)
+    glm_m3_out0=glm_m3_out0[-i]
+  if(glm_m3_out[i]<0)
+    glm_m3_out1=glm_m3_out1[-i]
+}
+
+variable11=as.numeric(str_remove(names(glm_m1_out1),"V"))
+variable10=as.numeric(str_remove(names(glm_m1_out0),"V"))
+variable21=as.numeric(str_remove(names(glm_m2_out1),"V"))
+variable20=as.numeric(str_remove(names(glm_m2_out0),"V"))
+variable31=as.numeric(str_remove(names(glm_m3_out1),"V"))
+variable30=as.numeric(str_remove(names(glm_m3_out0),"V"))
+colnames(Data_Q4_4mers[,c(variable31+1)])
+colnames(Data_Q4_4mers[,c(variable30+1)])
+
+
+variable1=as.numeric(str_remove(names(glm_m1_out[-1]),"V"))
+variable2=as.numeric(str_remove(names(glm_m2_out[-1]),"V"))
+variable3=as.numeric(str_remove(names(glm_m3_out[-1]),"V"))
+
+plot(glmnet_Q4_4mers_class1,xvar = "lambda")
+plot(glmnet_Q4_4mers_class2,xvar = "lambda")
+plot(glmnet_Q4_4mers_class3,xvar = "lambda")
+```
+
+```{r logistic 4mers}
+
+Data_Q4_class1_4mers_0=Data_Q4_4mers[,c(variable1+1,ncol(Data_Q4_4mers))]
+Data_Q4_class1_4mers_0[which(Data_Q4_class1_4mers_0$Class!=1),"Class"] <- 0
+model1=glm(Class ~ .-Class,data=Data_Q4_class1_4mers_0,family = "binomial")
+summary(model1)
+
+Data_Q4_class2_4mers_0=Data_Q4_4mers[,c(variable2+1,ncol(Data_Q4_4mers))]
+Data_Q4_class2_4mers_0[which(Data_Q4_class2_4mers_0$Class!=2),"Class"] <- 0
+Data_Q4_class2_4mers_0[which(Data_Q4_class2_4mers_0$Class==2),"Class"] <- 1
+model2=glm(Class ~ .-Class,data=Data_Q4_class2_4mers_0,family = "binomial")
+summary(model2)
+
+Data_Q4_class3_4mers_0=Data_Q4_4mers[,c(variable3+1,ncol(Data_Q4_4mers))]
+Data_Q4_class3_4mers_0[which(Data_Q4_class3_4mers_0$Class!=3),"Class"] <- 0
+Data_Q4_class3_4mers_0[which(Data_Q4_class3_4mers_0$Class==3),"Class"] <- 1
+model3=glm(Class ~ .-Class,data=Data_Q4_class3_4mers_0,family = "binomial")
+summary(model3)
+ 
+anova(model3)
+prob1<-predict(object =model1,newdata=Data_Q4_class1_4mers_0[,-ncol(Data_Q4_class1_4mers_0)],type = "response")
+pred1<-ifelse(prob1>=0.5,"yes","no")
+pred1<-factor(pred1,levels = c("no","yes"),order=TRUE)
+f1<-table(Data_Q4_class1_4mers_0$Class,pred1)
+
+prob2<-predict(object =model2,newdata=Data_Q4_class2_4mers_0[,-ncol(Data_Q4_class2_4mers_0)],type = "response")
+pred2<-ifelse(prob2>=0.5,"yes","no")
+pred2<-factor(pred2,levels = c("no","yes"),order=TRUE)
+f2<-table(Data_Q4_class2_4mers_0$Class,pred2)
+
+prob3<-predict(object =model3,newdata=Data_Q4_class3_4mers_0[,-ncol(Data_Q4_class3_4mers_0)],type = "response")
+pred3<-ifelse(prob3>=0.5,"yes","no")
+pred3<-factor(pred3,levels = c("no","yes"),order=TRUE)
+f3<-table(Data_Q4_class3_4mers_0$Class,pred3)
+#模型对非流失客户(no)的预测还是非常准确的（1408/(1408+35)=97.6%）;
+#模型对流失客户(yes)的预测非常不理想（42/(182+42)=18.8%）
+#模型的整体预测准确率为87.0%((1408+42)/(1408+35+182+42))，还算说得过去。
+#link:https://zhuanlan.zhihu.com/p/28414024
+
+roc_curve1 <- roc(Data_Q4_class1_4mers_0$Class,prob1)
+roc_curve2 <- roc(Data_Q4_class2_4mers_0$Class,prob2)
+roc_curve3 <- roc(Data_Q4_class3_4mers_0$Class,prob3)
+names(roc_curve1)
+
+x <- 1-roc_curve1$specificities
+y <- roc_curve1$sensitivities
+p <- ggplot(data = NULL, mapping = aes(x= x, y = y))
+p1=p + geom_line(colour = 'red') +geom_abline(intercept = 0, slope = 1)+ annotate('text', x = 0.4, y = 0.5, label=paste('AUC=',round(roc_curve1$auc,2)))+ labs(x = '1-specificities',y = 'sensitivities', title = 'ROC Curve')+theme_bw()+theme(panel.grid=element_blank(),panel.border=element_blank(),axis.line=element_line(size=1,colour="black"))
+
+x <- 1-roc_curve2$specificities
+y <- roc_curve2$sensitivities
+p <- ggplot(data = NULL, mapping = aes(x= x, y = y))
+p2=p + geom_line(colour = 'red') +geom_abline(intercept = 0, slope = 1)+ annotate('text', x = 0.4, y = 0.5, label=paste('AUC=',round(roc_curve2$auc,2)))+ labs(x = '1-specificities',y = 'sensitivities', title = 'ROC Curve')+theme_bw()+theme(panel.grid=element_blank(),panel.border=element_blank(),axis.line=element_line(size=1,colour="black"))
+
+x <- 1-roc_curve3$specificities
+y <- roc_curve3$sensitivities
+p <- ggplot(data = NULL, mapping = aes(x= x, y = y))
+p3=p + geom_line(colour = 'red') +geom_abline(intercept = 0, slope = 1)+ annotate('text', x = 0.4, y = 0.5, label=paste('AUC=',round(roc_curve3$auc,2)))+ labs(x = '1-specificities',y = 'sensitivities', title = 'ROC Curve')+theme_bw()+theme(panel.grid=element_blank(),panel.border=element_blank(),axis.line=element_line(size=1,colour="black"))
+
+png("Q4_logistic_ROC_4mers.png", width=900, height=300)
+p1+p2+p3
+dev.off()
+
+
+#predict(glmnet_multi,newx=gl_x,s=0.01215)
+
+
+```
